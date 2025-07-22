@@ -1,4 +1,5 @@
 🧹TrashCleaner
+
 TrashCleaner is a free and safe Windows tool designed to remove temporary files, browser cache and system leftovers, including folders after Windows updates.
 
 🚀 Features
