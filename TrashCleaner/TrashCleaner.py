@@ -5,6 +5,7 @@ from tkinter import messagebox, ttk
 import logging
 import threading
 import time
+import ctypes
 
 
 logging.basicConfig(
@@ -13,7 +14,28 @@ logging.basicConfig(
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
-# Cleaning dirs
+
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+
+if not is_admin():
+    root = tk.Tk()
+    root.withdraw()
+    response = messagebox.askyesno(
+        "Administrator rights",
+        "It is recommended to run the program as administrator.\n"
+        "Without access rights, some files cannot be cleaned.\n\n\n"
+        "Continue without administrator rights?"
+    )
+    if not response:
+        root.destroy()
+        exit()
+    root.destroy()
+
 
 DEFAULT_DIRS = [
     os.environ.get("TEMP", ""),
@@ -30,13 +52,13 @@ DEFAULT_DIRS = [
     "C:\\Windows.old",
 ]
 
+
 CACHE_FOLDERS_TO_SCAN = {
     "Cache", "cache", "cache2", "User Data", "Profile", "Default", "entries",
     "Opera Stable", "Brave-Browser", "YandexBrowser", ".mozilla",
     "temp", "tmp", "download", "updates", "logs", "recent", "thumbnails"
 }
 
-# Exception paths
 
 BLACKLIST_PATHS = {
     os.environ.get("APPDATA", ""),
@@ -48,7 +70,6 @@ BLACKLIST_PATHS = {
     os.path.join(os.environ.get("WINDIR", ""), "SysWOW64")
 }
 
-# Cleaning exceptions
 
 EXCLUDE_KEYWORDS = {
     "login data", "cookies", "web data", "bookmarks", "history", "preferences",
@@ -58,7 +79,6 @@ EXCLUDE_KEYWORDS = {
 }
 
 
-# Global vars
 found_files = []
 categorized_files = {}
 category_vars = {}
@@ -121,8 +141,7 @@ def scan_all_drives_for_cache():
                                         (full_path, format_size(os.path.getsize(full_path))))
                         dirs.remove(folder)
                     except Exception as e:
-                        logging.error(
-                            f"Drive scan error: {cache_path} — {e}")
+                        logging.error(f"Drive scan error: {cache_path} — {e}")
     return found
 
 
@@ -157,14 +176,15 @@ CATEGORIES = {
 def categorize_files(files):
     categorized = {k: [] for k in CATEGORIES}
     for path, size in files:
-        path = path.lower()
-        if "temp" in path or "tmp" in path:
+        path_lower = path.lower()
+        if "temp" in path_lower or "tmp" in path_lower:
             categorized["System Temp"].append((path, size))
-        elif "cache" in path or "browser" in path or "chrome" in path or "brave" in path or "opera" in path:
+        elif "cache" in path_lower or "browser" in path_lower or "chrome" in path_lower or \
+             "brave" in path_lower or "opera" in path_lower:
             categorized["Browser Cache"].append((path, size))
-        elif "logs" in path or "softwaredistribution" in path:
+        elif "logs" in path_lower or "softwaredistribution" in path_lower:
             categorized["Windows Cache"].append((path, size))
-        elif "recent" in path or "prefetch" in path:
+        elif "recent" in path_lower or "prefetch" in path_lower:
             categorized["Recent/Prefetch"].append((path, size))
         else:
             categorized["Other Temp"].append((path, size))
@@ -180,29 +200,49 @@ def scan_files_thread():
     global found_files, categorized_files
     found_files = []
     start_time = time.time()
-    all_dirs = [d for d in DEFAULT_DIRS if os.path.exists(d)]
+
+    restricted_paths = [
+        os.environ.get("WINDIR", ""),
+        "C:\\$WINDOWS.~BT",
+        "C:\\Windows.old"
+    ]
+
+    if is_admin():
+        all_dirs = [d for d in DEFAULT_DIRS if os.path.exists(d)]
+    else:
+        all_dirs = [
+            d for d in DEFAULT_DIRS
+            if os.path.exists(d) and not any(d.startswith(rp) for rp in restricted_paths if rp)
+        ]
+
     total_steps = len(all_dirs) + 4
     step = 0
     time_per_step = []
 
     for directory in all_dirs:
-        for root, dirs, files in os.walk(directory):
-            for file in files:
-                full_path = os.path.join(root, file)
-                if should_delete(full_path):
-                    try:
-                        found_files.append(
-                            (full_path, format_size(os.path.getsize(full_path))))
-                    except Exception as e:
-                        logging.error(f"Error: cannot add {full_path} — {e}")
+        try:
+            for root, dirs, files in os.walk(directory):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    if should_delete(full_path):
+                        try:
+                            found_files.append(
+                                (full_path, format_size(os.path.getsize(full_path))))
+                        except Exception as e:
+                            logging.error(
+                                f"Error reading file: {full_path} — {e}")
+        except Exception as e:
+            logging.error(f"Access denied to directory: {directory} — {e}")
+
         step += 1
         elapsed = time.time() - start_time
-        time_per_step.append(elapsed / step)
-        avg_time = sum(time_per_step) / len(time_per_step)
-        remaining = int(avg_time * (total_steps - step))
-        app.after(0, lambda r=remaining: status_label.config(
-            text=f"🔍 Scanning files... Estimated time: ~{r}s left"
-        ))
+        if step > 0:
+            time_per_step.append(elapsed / step)
+            avg_time = sum(time_per_step) / len(time_per_step)
+            remaining = int(avg_time * (total_steps - step))
+            app.after(0, lambda r=remaining: status_label.config(
+                text=f"🔍 Scanning files... Estimated time: ~{r}s left"
+            ))
         time.sleep(0.1)
 
     chrome_path = os.path.join(
@@ -226,10 +266,11 @@ def scan_files_thread():
     categorized_files = categorize_files(found_files)
     total_time = int(time.time() - start_time)
     total_size = sum(size for _, size in found_files)
+
     app.after(0, lambda: status_label.config(
         text=f"✅ Found {len(found_files)} files. Total size: {total_size:.2f} MB | Took {total_time}s"
     ))
-    app.after(0, lambda: update_category_view())
+    app.after(0, update_category_view)
 
 
 def update_category_view():
@@ -241,8 +282,13 @@ def update_category_view():
         frame = tk.Frame(file_frame, bg="#1e1e1e")
         frame.pack(fill='x', padx=5, pady=2)
         cb = tk.Checkbutton(
-            frame, text=f"📁 {category} — {sum(size for _, size in categorized_files[category]):.2f} MB",
-            variable=var, bg="#1e1e1e", fg="white", selectcolor="#333333", anchor='w'
+            frame,
+            text=f"📁 {category} — {sum(size for _, size in categorized_files[category]):.2f} MB",
+            variable=var,
+            bg="#1e1e1e",
+            fg="white",
+            selectcolor="#333333",
+            anchor='w'
         )
         cb.pack(fill='x')
 
@@ -252,6 +298,7 @@ def delete_files_by_category():
     freed_space = 0
     status_label.config(text="🗑️ Deleting files...")
     app.update_idletasks()
+
     for category, data in category_vars.items():
         if data.get():
             for path, size in categorized_files[category]:
@@ -266,9 +313,11 @@ def delete_files_by_category():
                         freed_space += size
                 except Exception as e:
                     logging.error(f"Deleting error: {path} — {e}")
-                    messagebox.showerror("Error", f"Could not delete: {path}")
+
     messagebox.showinfo(
-        "Result", f"Deleted {deleted_count} files. Freed: {freed_space:.2f} MB")
+        "Result",
+        f"Deleted {deleted_count} files. Freed: {freed_space:.2f} MB"
+    )
     find_files()
 
 
@@ -286,7 +335,12 @@ def delete_selected_categories():
 
 def show_about():
     messagebox.showinfo(
-        "About", "🧹 TrashCleaner\nVersion: 1.1\nAuthor: Sad Scob\nGitHub: https://github.com/iamscob ")
+        "About",
+        "🧹 TrashCleaner\n"
+        "Version: 1.1\n"
+        "Author: Sad Scob\n"
+        "GitHub: https://github.com/iamscob "
+    )
 
 
 app = tk.Tk()
@@ -297,12 +351,15 @@ app.configure(bg="#1e1e1e")
 
 btn_frame = tk.Frame(app, bg="#1e1e1e")
 btn_frame.pack(pady=10)
+
 find_btn = tk.Button(btn_frame, text="Find Temporary Files",
                      width=25, command=find_files, bg="#444444", fg="white")
 find_btn.pack(side=tk.LEFT, padx=5)
+
 delete_all_btn = tk.Button(btn_frame, text="Delete All Categories",
                            width=25, command=delete_all_categories, bg="#444444", fg="white")
 delete_all_btn.pack(side=tk.LEFT, padx=5)
+
 delete_selected_btn = tk.Button(btn_frame, text="Delete Selected Categories",
                                 width=25, command=delete_selected_categories, bg="#444444", fg="white")
 delete_selected_btn.pack(side=tk.LEFT, padx=5)
