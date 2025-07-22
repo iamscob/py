@@ -6,14 +6,15 @@ import logging
 import threading
 import time
 
-# Логирование ошибок
+
 logging.basicConfig(
     filename="error_log.txt",
     level=logging.ERROR,
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
-# Настройки
+# Cleaning dirs
+
 DEFAULT_DIRS = [
     os.environ.get("TEMP", ""),
     os.path.join(os.environ.get("WINDIR", ""), "Temp"),
@@ -25,24 +26,18 @@ DEFAULT_DIRS = [
                  "Microsoft", "Windows", "Recent"),
     os.path.join(os.environ.get("LOCALAPPDATA", ""),
                  "Microsoft", "Windows", "Explorer"),
+    "C:\\$WINDOWS.~BT",
+    "C:\\Windows.old",
 ]
 
-# Ключевые слова для исключения важных файлов
-EXCLUDE_KEYWORDS = {
-    "login data", "cookies", "web data", "bookmarks", "history", "preferences",
-    "current sessions", "extension", "extensions", "local storage", "databases",
-    "sessions", "key", "secret", "password", "autofill", "topsites", "favicons",
-    "recovery", "wallet", "auth", "account", "token", "cache index",
-}
-
-# Папки, которые могут быть кэшем
 CACHE_FOLDERS_TO_SCAN = {
     "Cache", "cache", "cache2", "User Data", "Profile", "Default", "entries",
     "Opera Stable", "Brave-Browser", "YandexBrowser", ".mozilla",
     "temp", "tmp", "download", "updates", "logs", "recent", "thumbnails"
 }
 
-# Пути, которые НИКОГДА не удаляем
+# Exception paths
+
 BLACKLIST_PATHS = {
     os.environ.get("APPDATA", ""),
     os.environ.get("LOCALAPPDATA", ""),
@@ -53,18 +48,24 @@ BLACKLIST_PATHS = {
     os.path.join(os.environ.get("WINDIR", ""), "SysWOW64")
 }
 
-# Глобальные переменные
+# Cleaning exceptions
+
+EXCLUDE_KEYWORDS = {
+    "login data", "cookies", "web data", "bookmarks", "history", "preferences",
+    "current sessions", "extension", "extensions", "local storage", "databases",
+    "sessions", "key", "secret", "password", "autofill", "topsites", "favicons",
+    "recovery", "wallet", "auth", "account", "token", "cache index",
+}
+
+
+# Global vars
 found_files = []
 categorized_files = {}
 category_vars = {}
 
-# Форматирование размера файла
-
 
 def format_size(size_bytes):
     return round(size_bytes / (1024 * 1024), 2)
-
-# Проверка: можно ли удалять файл?
 
 
 def should_delete(path):
@@ -76,8 +77,6 @@ def should_delete(path):
     if any(path.startswith(bl_path) for bl_path in BLACKLIST_PATHS if bl_path):
         return False
     return True
-
-# Поиск кэша браузеров
 
 
 def find_browser_cache(base_path, cache_folder="Cache"):
@@ -98,12 +97,10 @@ def find_browser_cache(base_path, cache_folder="Cache"):
                             (full_path, format_size(os.path.getsize(full_path))))
     return found
 
-# Сканирование дисков на наличие кэша
-
 
 def scan_all_drives_for_cache():
     drives = [
-        f"{d}:\\\\" for d in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if os.path.exists(f"{d}:\\")]
+        f"{d}:\\" for d in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if os.path.exists(f"{d}:\\")]
     found = []
     for drive in drives:
         for root, dirs, files in os.walk(drive, topdown=True, onerror=lambda _: None, followlinks=False):
@@ -125,10 +122,8 @@ def scan_all_drives_for_cache():
                         dirs.remove(folder)
                     except Exception as e:
                         logging.error(
-                            f"Ошибка при сканировании: {cache_path} — {e}")
+                            f"Drive scan error: {cache_path} — {e}")
     return found
-
-# Кэш Firefox
 
 
 def find_firefox_cache(path):
@@ -150,7 +145,6 @@ def find_firefox_cache(path):
     return found
 
 
-# Категории
 CATEGORIES = {
     "System Temp": [],
     "Browser Cache": [],
@@ -158,8 +152,6 @@ CATEGORIES = {
     "Recent/Prefetch": [],
     "Other Temp": [],
 }
-
-# Распределение файлов по категориям
 
 
 def categorize_files(files):
@@ -178,14 +170,10 @@ def categorize_files(files):
             categorized["Other Temp"].append((path, size))
     return categorized
 
-# Начать сканирование
-
 
 def find_files():
-    status_label.config(text="🔍 Scanning files... Estimated time: ~30s left")
+    status_label.config(text="🔍 Scanning files... Estimated time: ~1min left")
     threading.Thread(target=scan_files_thread, daemon=True).start()
-
-# Поток сканирования
 
 
 def scan_files_thread():
@@ -197,7 +185,6 @@ def scan_files_thread():
     step = 0
     time_per_step = []
 
-    # Сканирование системных папок
     for directory in all_dirs:
         for root, dirs, files in os.walk(directory):
             for file in files:
@@ -218,7 +205,6 @@ def scan_files_thread():
         ))
         time.sleep(0.1)
 
-    # Сканирование браузеров
     chrome_path = os.path.join(
         os.environ["LOCALAPPDATA"], "Google", "Chrome", "User Data")
     found_files.extend(find_browser_cache(chrome_path))
@@ -237,7 +223,6 @@ def scan_files_thread():
 
     found_files.extend(scan_all_drives_for_cache())
 
-    # Категоризация
     categorized_files = categorize_files(found_files)
     total_time = int(time.time() - start_time)
     total_size = sum(size for _, size in found_files)
@@ -245,8 +230,6 @@ def scan_files_thread():
         text=f"✅ Found {len(found_files)} files. Total size: {total_size:.2f} MB | Took {total_time}s"
     ))
     app.after(0, lambda: update_category_view())
-
-# Обновление отображения категорий
 
 
 def update_category_view():
@@ -262,8 +245,6 @@ def update_category_view():
             variable=var, bg="#1e1e1e", fg="white", selectcolor="#333333", anchor='w'
         )
         cb.pack(fill='x')
-
-# Удаление выбранных категорий
 
 
 def delete_files_by_category():
@@ -284,21 +265,17 @@ def delete_files_by_category():
                         deleted_count += 1
                         freed_space += size
                 except Exception as e:
-                    logging.error(f"Ошибка при удалении: {path} — {e}")
+                    logging.error(f"Deleting error: {path} — {e}")
                     messagebox.showerror("Error", f"Could not delete: {path}")
     messagebox.showinfo(
         "Result", f"Deleted {deleted_count} files. Freed: {freed_space:.2f} MB")
     find_files()
-
-# Удалить все
 
 
 def delete_all_categories():
     for category in category_vars:
         category_vars[category].set(True)
     delete_files_by_category()
-
-# Удалить выбранное
 
 
 def delete_selected_categories():
@@ -307,14 +284,17 @@ def delete_selected_categories():
         delete_files_by_category()
 
 
-# GUI
+def show_about():
+    messagebox.showinfo(
+        "About", "🧹 TrashCleaner\nVersion: 1.1\nAuthor: Sad Scob\nGitHub: https://github.com/iamscob ")
+
+
 app = tk.Tk()
 app.title("TrashCleaner")
 app.geometry("1100x850")
 app.resizable(False, False)
 app.configure(bg="#1e1e1e")
 
-# Кнопки
 btn_frame = tk.Frame(app, bg="#1e1e1e")
 btn_frame.pack(pady=10)
 find_btn = tk.Button(btn_frame, text="Find Temporary Files",
@@ -327,7 +307,6 @@ delete_selected_btn = tk.Button(btn_frame, text="Delete Selected Categories",
                                 width=25, command=delete_selected_categories, bg="#444444", fg="white")
 delete_selected_btn.pack(side=tk.LEFT, padx=5)
 
-# Список категорий
 canvas = tk.Canvas(app, bg="#1e1e1e", highlightthickness=0)
 scrollbar = tk.Scrollbar(app, orient="vertical", command=canvas.yview)
 file_frame = tk.Frame(canvas, bg="#1e1e1e")
@@ -339,18 +318,9 @@ canvas.configure(yscrollcommand=scrollbar.set)
 canvas.pack(side="left", fill="both", expand=True, padx=10, pady=10)
 scrollbar.pack(side="right", fill="y")
 
-# Статусбар
 status_label = tk.Label(app, text="Ready — Click 'Find Temporary Files'",
                         bd=1, relief=tk.SUNKEN, bg="#2a2a2a", fg="white")
 status_label.pack(side=tk.BOTTOM, fill=tk.X)
-
-# Меню
-
-
-def show_about():
-    messagebox.showinfo(
-        "About", "🧹 TrashCleaner\nVersion: 1.0\nAuthor: Sad Scob\nGitHub: https://github.com/iamscob ")
-
 
 menubar = tk.Menu(app)
 helpmenu = tk.Menu(menubar, tearoff=0)
@@ -358,6 +328,5 @@ helpmenu.add_command(label="About", command=show_about)
 menubar.add_cascade(label="Help", menu=helpmenu)
 app.config(menu=menubar)
 
-# Инициализация
 category_vars = {}
 app.mainloop()

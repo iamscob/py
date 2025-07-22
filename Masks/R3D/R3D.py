@@ -19,6 +19,7 @@ phrases = [
     "",
     "I am a computer?",
     "I am a human?",
+    "",
     "is this real?",
 ]
 
